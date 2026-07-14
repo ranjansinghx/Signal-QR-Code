@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Signal — QR Code Generator</title>
+
+<!--
+  SECURITY HEADERS NOTE:
+  The tags below cover what a static HTML file *can* enforce. Some critical
+  headers (X-Frame-Options / frame-ancestors, X-Content-Type-Options,
+  Strict-Transport-Security) can only be set by the server/host that
+  serves this file, not by a <meta> tag. See the "server-headers" files
+  included alongside this one (_headers for Netlify, vercel.json for
+  Vercel, netlify-and-others.md for GitHub Pages/Apache/Nginx) and apply
+  whichever matches your host before going live.
+-->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'none';
+  script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com;
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src https://fonts.gstatic.com;
+  img-src 'self' data:;
+  media-src 'self';
+  connect-src 'none';
+  object-src 'none';
+  base-uri 'none';
+  form-action 'none';
+  frame-ancestors 'none';
+  upgrade-insecure-requests;
+">
+<!--
+  Note on 'unsafe-inline' in script-src: this app's JS lives in one inline
+  <script> block rather than a separate .js file, so CSP has to allow inline
+  script execution or the whole page breaks. This does reduce what CSP can
+  protect against (it can no longer block an injected <script> tag from
+  running). That's an acceptable tradeoff here specifically because the code
+  never writes attacker-controlled data via innerHTML/outerHTML/document.write
+  (verified) — the CDN allowlist, frame-ancestors, and object-src 'none'
+  below are still doing real work. If you later split app.js into its own
+  file, drop 'unsafe-inline' from script-src for stronger protection.
+-->
+<meta http-equiv="Referrer-Policy" content="no-referrer">
+<!--
+  Two headers deliberately NOT included above as <meta> tags because they
+  don't work that way — shipping them here would look like protection
+  without actually doing anything:
+  - X-Content-Type-Options: the spec has no meta-tag equivalent for this
+    one at all; it only works as a real HTTP response header.
+  - Permissions-Policy: reliable browser support is HTTP-header-only.
+  Also note: the "frame-ancestors" line inside the CSP meta tag above is
+  silently ignored by browsers when CSP is delivered via <meta> (spec
+  requirement) — it only takes effect via an HTTP header. It's left in
+  the meta tag as documentation of intent, but the actual clickjacking
+  protection for this app comes from the frame-ancestors/X-Frame-Options
+  line in the server-headers files below — that's the one that matters.
+  Add whichever file matches your host before calling this "live":
+    - server-headers/_headers          → Netlify
+    - server-headers/vercel.json        → Vercel
+    - server-headers/README-SECURITY.md → GitHub Pages / Apache / Nginx /
+                                           Cloudflare Pages instructions,
+                                           plus the SRI-hash-generation command
+-->
+
+<!--
+  Subresource Integrity (SRI): these hashes pin the CDN files to their
+  exact known bytes. If cdnjs ever served different code under the same
+  URL (compromise, MITM, etc.), the browser refuses to run it instead of
+  silently executing it.
+  - qrcode.min.js hash below is confirmed against multiple independent
+    public projects pinning this exact cdnjs 1.0.0 file.
+  - jsQR.js has NO integrity hash yet below — it could not be independently
+    verified while preparing this file. See server-headers/README-SECURITY.md
+    for the exact one-line command to generate it yourself, then add
+    integrity="sha512-..." to that <script> tag. Do NOT paste in a guessed
+    hash: a wrong hash makes the browser block the script entirely and the
+    QR scanner will stop working.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
+  integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSQX0FslNhTDadL4O5SAGapGt4FodqL8My0mA=="
+  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"
+  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<!-- ^ integrity hash intentionally omitted here — see server-headers/README-SECURITY.md
+     to generate and add the correct one. A wrong/guessed hash would make the
+     browser silently refuse to run this file and the scanner would stop working. -->
+<style>
+  :root{
+    --paper:#121210;
+    --panel:#1C1C19;
+    --ink:#F2F0E6;
+    --grid:#302F29;
+    --signal:#FF5A3C;
+    --confirm:#5FBF83;
+    --muted:#8A8879;
+    --faint:#5C5A50;
+    --mono-face:'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    --display-face:'Space Grotesk', 'Arial Narrow', sans-serif;
+    --body-face:-apple-system, 'Inter', 'Segoe UI', sans-serif;
+  }
+
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
+
+  *{box-sizing:border-box;}
+
+  body{
+    margin:0;
+    background:var(--paper);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+    color:var(--ink);
+    font-family:var(--body-face);
+    min-height:100vh;
+    padding:40px 24px 60px;
+  }
+
+  @media (max-width: 480px){
+    body{padding:20px 16px 40px;}
+  }
+
+  .wrap{
+    max-width:980px;
+    margin:0 auto;
+  }
+
+  header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    border-bottom:2px solid var(--ink);
+    padding-bottom:18px;
+    margin-bottom:36px;
+    flex-wrap:wrap;
+    gap:12px;
+  }
+
+  @media (max-width: 480px){
+    header{
+      align-items:flex-start;
+      margin-bottom:28px;
+    }
+    h1{font-size:21px;}
+    .status{font-size:10px;}
+  }
+
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:14px;
+  }
+
+  .brand-mark{
+    width:34px;
+    height:34px;
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    grid-template-rows:repeat(3,1fr);
+    gap:2px;
+    flex-shrink:0;
+  }
+  .brand-mark div{background:var(--ink);}
+  .brand-mark div:nth-child(2),
+  .brand-mark div:nth-child(4),
+  .brand-mark div:nth-child(6),
+  .brand-mark div:nth-child(8){background:transparent;}
+  .brand-mark div:nth-child(5){background:var(--signal);}
+
+  h1{
+    font-family:var(--display-face);
+    font-size:26px;
+    font-weight:700;
+    letter-spacing:-0.02em;
+    margin:0;
+  }
+
+  .tagline{
+    font-family:var(--mono-face);
+    font-size:11px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--muted);
+    margin-top:2px;
+  }
+
+  .status{
+    font-family:var(--mono-face);
+    font-size:11px;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    color:var(--confirm);
+    display:flex;
+    align-items:center;
+    gap:6px;
+  }
+  .status .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--confirm);
+    box-shadow:0 0 0 0 rgba(95,191,131,0.5);
+    animation:pulse 2s infinite;
+  }
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(95,191,131,0.45);}
+    70%{box-shadow:0 0 0 6px rgba(95,191,131,0);}
+    100%{box-shadow:0 0 0 0 rgba(95,191,131,0);}
+  }
+
+  main{
+    display:grid;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap:48px;
+  }
+
+  @media (max-width: 760px){
+    main{grid-template-columns:1fr; gap:36px;}
+  }
+
+  @media (max-width: 480px){
+    main{gap:28px;}
+  }
+
+  .field-label{
+    font-family:var(--mono-face);
+    font-size:11px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--muted);
+    display:block;
+    margin-bottom:8px;
+  }
+
+  .app-tabs{
+    display:flex;
+    gap:8px;
+    margin-bottom:32px;
+    max-width:420px;
+  }
+  .app-tabs button{
+    flex:1;
+    font-family:var(--display-face);
+    font-weight:600;
+    font-size:13.5px;
+    letter-spacing:0.01em;
+    padding:11px 12px;
+    border:1.5px solid var(--ink);
+    background:var(--panel);
+    color:var(--ink);
+    border-radius:2px;
+    cursor:pointer;
+  }
+  .app-tabs button.active{
+    background:var(--signal);
+    border-color:var(--signal);
+    color:#fff;
+  }
+  .app-tabs button:hover:not(.active){
+    background:var(--grid);
+  }
+
+  #scan-video{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    display:none;
+  }
+
+  #scan-canvas{display:none;}
+
+  .scan-status-row{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    width:100%;
+    max-width:320px;
+    margin-top:14px;
+    font-family:var(--mono-face);
+    font-size:11px;
+    letter-spacing:0.03em;
+    color:var(--muted);
+  }
+  .scan-status-row .dot{
+    width:7px;height:7px;border-radius:50%;
+    background:var(--faint);
+    flex-shrink:0;
+  }
+  .scan-status-row.live .dot{
+    background:var(--confirm);
+    box-shadow:0 0 0 0 rgba(95,191,131,0.5);
+    animation:pulse 2s infinite;
+  }
+
+  .scan-layout{
+    display:grid;
+    grid-template-columns: 0.95fr 1.05fr;
+    gap:48px;
+  }
+  @media (max-width: 760px){
+    .scan-layout{grid-template-columns:1fr; gap:36px;}
+  }
+
+  .result-card{
+    border:1.5px solid var(--ink);
+    border-radius:2px;
+    background:var(--panel);
+    margin-bottom:20px;
+    overflow:hidden;
+  }
+  .result-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:14px;
+    border-bottom:1px solid var(--grid);
+  }
+  .result-row:last-child{border-bottom:none;}
+  .result-row .result-label{
+    font-family:var(--mono-face);
+    font-size:10.5px;
+    letter-spacing:0.08em;
+    text-transform:uppercase;
+    color:var(--muted);
+    width:64px;
+    flex-shrink:0;
+  }
+  .result-row .result-value{
+    font-family:var(--mono-face);
+    font-size:14px;
+    color:var(--ink);
+    flex:1;
+    word-break:break-all;
+  }
+  .result-row .result-value.masked{
+    -webkit-text-security:disc;
+    text-security:disc;
+  }
+  .result-row button{
+    font-family:var(--mono-face);
+    font-size:10.5px;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+    padding:7px 10px;
+    border:1.5px solid var(--ink);
+    background:transparent;
+    color:var(--ink);
+    border-radius:2px;
+    cursor:pointer;
+    flex-shrink:0;
+  }
+  .result-row button:hover{
+    background:var(--ink);
+    color:var(--paper);
+  }
+
+  .scan-again-btn{
+    width:100%;
+    font-family:var(--mono-face);
+    font-size:12px;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+    padding:11px;
+    background:transparent;
+    border:1.5px solid var(--grid);
+    color:var(--muted);
+    border-radius:2px;
+    cursor:pointer;
+    margin-top:12px;
+  }
+  .scan-again-btn:hover{
+    border-color:var(--ink);
+    color:var(--ink);
+  }
+
+  .field{margin-bottom:26px;}
+
+  .pw-field{
+    position:relative;
+  }
+  .pw-field input{padding-right:66px;}
+  .pw-toggle{
+    position:absolute;
+    right:6px;
+    top:50%;
+    transform:translateY(-50%);
+    font-family:var(--mono-face);
+    font-size:10.5px;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+    background:none;
+    border:none;
+    color:var(--muted);
+    cursor:pointer;
+    padding:6px 8px;
+  }
+  .pw-toggle:hover{color:var(--ink);}
+
+  .checkbox-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-top:12px;
+  }
+  .checkbox-row input[type="checkbox"]{
+    width:16px;height:16px;
+    accent-color:var(--signal);
+    cursor:pointer;
+  }
+  .checkbox-row label{
+    font-family:var(--mono-face);
+    font-size:12px;
+    letter-spacing:0.03em;
+    color:var(--muted);
+    cursor:pointer;
+  }
+
+  .info-note{
+    font-family:var(--mono-face);
+    font-size:10.5px;
+    line-height:1.6;
+    letter-spacing:0.02em;
+    color:var(--muted);
+    background:var(--panel);
+    border:1px solid var(--grid);
+    border-left:2px solid var(--signal);
+    padding:10px 12px;
+    margin-top:-8px;
+    margin-bottom:26px;
+  }
+
+  textarea, select, input[type="text"]{
+    width:100%;
+    font-family:var(--body-face);
+    font-size:15px;
+    background:var(--panel);
+    border:1.5px solid var(--ink);
+    border-radius:2px;
+    padding:12px 14px;
+    color:var(--ink);
+    resize:vertical;
+  }
+  textarea:focus, select:focus, input:focus{
+    outline:2px solid var(--signal);
+    outline-offset:1px;
+  }
+
+  textarea{min-height:88px; line-height:1.5;}
+
+  @media (max-width: 480px){
+    textarea, select, input[type="text"]{font-size:16px;}
+  }
+
+  .row{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap:16px;
+  }
+
+  .swatches{
+    display:flex;
+    gap:10px;
+    align-items:center;
+  }
+
+  @media (max-width: 480px){
+    .swatches{gap:10px;}
+    .swatch-input{flex:1;}
+  }
+
+  .swatch-input{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    border:1.5px solid var(--ink);
+    padding:6px 10px 6px 6px;
+    border-radius:2px;
+    background:var(--panel);
+  }
+  .swatch-input input[type="color"]{
+    width:28px;height:28px;
+    border:none;
+    padding:0;
+    background:none;
+    cursor:pointer;
+  }
+  .swatch-input span{
+    font-family:var(--mono-face);
+    font-size:12px;
+    color:var(--muted);
+  }
+
+  .size-options{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .size-options button{
+    font-family:var(--mono-face);
+    font-size:12px;
+    padding:8px 12px;
+    border:1.5px solid var(--ink);
+    background:var(--panel);
+    color:var(--ink);
+    border-radius:2px;
+    cursor:pointer;
+    letter-spacing:0.03em;
+  }
+  .size-options button.active{
+    background:var(--ink);
+    color:var(--paper);
+  }
+  .size-options button:hover:not(.active){
+    background:var(--grid);
+  }
+
+  @media (max-width: 480px){
+    .size-options{gap:8px;}
+    .size-options button{
+      flex:1 1 calc(50% - 8px);
+      padding:11px 8px;
+      font-size:12.5px;
+    }
+  }
+
+  .generate-btn{
+    width:100%;
+    font-family:var(--display-face);
+    font-weight:600;
+    font-size:15px;
+    letter-spacing:0.01em;
+    padding:15px;
+    background:var(--signal);
+    color:#fff;
+    border:none;
+    border-radius:2px;
+    cursor:pointer;
+    margin-top:6px;
+    transition:transform 0.08s ease;
+  }
+  .generate-btn:active{transform:scale(0.985);}
+  .generate-btn:hover{background:#E14E32;}
+
+  @media (max-width: 480px){
+    .generate-btn{padding:16px; font-size:16px;}
+  }
+
+  /* --- preview panel --- */
+  .preview-panel{
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+  }
+
+  .viewfinder{
+    position:relative;
+    width:100%;
+    max-width:320px;
+    aspect-ratio:1;
+    background:var(--panel);
+    border:1px solid var(--grid);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+  }
+
+  .corner{
+    position:absolute;
+    width:26px;
+    height:26px;
+    border:3px solid var(--ink);
+  }
+  .corner.tl{top:-3px; left:-3px; border-right:none; border-bottom:none;}
+  .corner.tr{top:-3px; right:-3px; border-left:none; border-bottom:none;}
+  .corner.bl{bottom:-3px; left:-3px; border-right:none; border-top:none;}
+  .corner.br{bottom:-3px; right:-3px; border-left:none; border-top:none;}
+
+  #qr-target{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  #qr-target img, #qr-target canvas{
+    display:block;
+    max-width:100%;
+  }
+
+  .scan-line{
+    position:absolute;
+    left:6px;
+    right:6px;
+    height:2px;
+    background:var(--signal);
+    opacity:0;
+    box-shadow:0 0 8px var(--signal);
+  }
+  .scan-line.active{
+    animation:scan 0.9s ease-out;
+  }
+  @keyframes scan{
+    0%{top:6%; opacity:1;}
+    90%{opacity:1;}
+    100%{top:94%; opacity:0;}
+  }
+
+  .meta-row{
+    display:flex;
+    justify-content:space-between;
+    width:100%;
+    max-width:320px;
+    margin-top:14px;
+    font-family:var(--mono-face);
+    font-size:11px;
+    color:var(--muted);
+    letter-spacing:0.03em;
+  }
+
+  .download-row{
+    display:flex;
+    gap:10px;
+    margin-top:20px;
+    width:100%;
+    max-width:320px;
+  }
+  .download-row button{
+    flex:1;
+    font-family:var(--mono-face);
+    font-size:12px;
+    letter-spacing:0.05em;
+    padding:11px;
+    background:var(--panel);
+    border:1.5px solid var(--ink);
+    color:var(--ink);
+    border-radius:2px;
+    cursor:pointer;
+    text-transform:uppercase;
+  }
+  .download-row button:hover{
+    background:var(--ink);
+    color:var(--paper);
+  }
+
+  @media (max-width: 480px){
+    .viewfinder{padding:14px;}
+    .download-row button{padding:13px; font-size:12.5px;}
+    .preview-panel{margin-top:4px;}
+  }
+
+  .empty-state{
+    font-family:var(--mono-face);
+    font-size:12px;
+    color:var(--faint);
+    text-align:center;
+    letter-spacing:0.03em;
+    line-height:1.6;
+  }
+
+  footer{
+    margin-top:56px;
+    padding-top:16px;
+    border-top:1px solid var(--grid);
+    font-family:var(--mono-face);
+    font-size:10.5px;
+    color:var(--faint);
+    letter-spacing:0.05em;
+    text-align:center;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="brand-mark">
+        <div></div><div></div><div></div>
+        <div></div><div></div><div></div>
+        <div></div><div></div><div></div>
+      </div>
+      <div>
+        <h1>Signal</h1>
+        <div class="tagline">QR Code Generator</div>
+      </div>
+    </div>
+    <div class="status"><span class="dot"></span>Ready to encode</div>
+  </header>
+
+  <div class="app-tabs" id="app-tabs">
+    <button data-tab="generate" class="active">Generate</button>
+    <button data-tab="scan">Scan</button>
+  </div>
+
+  <div id="generate-view">
+  <main>
+    <section>
+      <div class="field" id="text-field">
+        <label class="field-label" for="text-input">Content to encode</label>
+        <textarea id="text-input" placeholder="Paste a URL, address, or any text…" autocomplete="off"></textarea>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Module color / Background</label>
+        <div class="swatches">
+          <div class="swatch-input">
+            <input type="color" id="fg-color" value="#181815">
+            <span>ink</span>
+          </div>
+          <div class="swatch-input">
+            <input type="color" id="bg-color" value="#ffffff">
+            <span>base</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Output size</label>
+        <div class="size-options" id="size-options">
+          <button data-size="180">180px</button>
+          <button data-size="256" class="active">256px</button>
+          <button data-size="320">320px</button>
+          <button data-size="512">512px</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="ec-level">Error correction</label>
+        <select id="ec-level">
+          <option value="L">L — Low (7%)</option>
+          <option value="M" selected>M — Medium (15%)</option>
+          <option value="Q">Q — Quartile (25%)</option>
+          <option value="H">H — High (30%)</option>
+        </select>
+      </div>
+
+      <button class="generate-btn" id="generate-btn">Generate code</button>
+    </section>
+
+    <section class="preview-panel">
+      <div class="viewfinder">
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+        <div class="scan-line" id="scan-line"></div>
+        <div id="qr-target">
+          <div class="empty-state">— NO SIGNAL —<br>enter content and generate</div>
+        </div>
+      </div>
+      <div class="meta-row">
+        <span id="meta-size">256 × 256</span>
+        <span id="meta-ec">EC: M</span>
+      </div>
+      <div class="download-row">
+        <button id="download-png">Download PNG</button>
+      </div>
+    </section>
+  </main>
+  </div>
+
+  <div id="scan-view" style="display:none;">
+    <div class="scan-layout">
+      <section class="preview-panel">
+        <div class="viewfinder" id="scan-viewfinder">
+          <div class="corner tl"></div>
+          <div class="corner tr"></div>
+          <div class="corner bl"></div>
+          <div class="corner br"></div>
+          <div class="scan-line" id="cam-scan-line"></div>
+          <video id="scan-video" autoplay playsinline muted></video>
+          <div class="empty-state" id="scan-placeholder">— CAMERA OFF —<br>tap start to scan a Wi-Fi code</div>
+        </div>
+        <div class="scan-status-row" id="scan-status-row">
+          <span class="dot"></span>
+          <span id="scan-status-text">Camera idle</span>
+        </div>
+        <div class="download-row">
+          <button id="scan-toggle-btn">Start camera</button>
+        </div>
+      </section>
+
+      <section id="scan-result-section">
+        <div class="field-label">How this works</div>
+        <div class="info-note" style="margin-bottom:26px;">Point your webcam at any QR code. Once it's decoded, the raw content shows up below, ready to copy — and if it's a link, a Wi-Fi code, an email, or a phone number, extra shortcuts show up too.</div>
+
+        <div id="scan-result" style="display:none;">
+          <div class="field-label" id="scan-result-heading">Decoded content</div>
+          <div class="result-card">
+            <div class="result-row">
+              <span class="result-label" id="result-type-label">Content</span>
+              <span class="result-value" id="result-raw"></span>
+              <button type="button" id="result-raw-copy">Copy</button>
+            </div>
+            <div class="result-row" id="result-password-row" style="display:none;">
+              <span class="result-label">Password</span>
+              <span class="result-value masked" id="result-password"></span>
+              <button type="button" id="result-pw-toggle">Show</button>
+              <button type="button" id="result-password-copy">Copy</button>
+            </div>
+            <div class="result-row" id="result-security-row" style="display:none;">
+              <span class="result-label">Security</span>
+              <span class="result-value" id="result-security"></span>
+            </div>
+          </div>
+          <button class="generate-btn" id="open-link-btn" style="display:none;">Open link</button>
+          <button class="generate-btn" id="open-settings-btn" style="display:none;">Open Wi-Fi settings</button>
+          <button type="button" class="scan-again-btn" id="scan-again-btn">Scan another code</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <canvas id="scan-canvas" style="display:none;"></canvas>
+
+  <footer>ENCODED LOCALLY IN YOUR BROWSER — NOTHING IS SENT TO A SERVER</footer>
+</div>
+
+<script>
+  const textInput = document.getElementById('text-input');
+  const fgColor = document.getElementById('fg-color');
+  const bgColor = document.getElementById('bg-color');
+  const ecLevel = document.getElementById('ec-level');
+  const sizeOptions = document.getElementById('size-options');
+  const qrTarget = document.getElementById('qr-target');
+  const generateBtn = document.getElementById('generate-btn');
+  const scanLine = document.getElementById('scan-line');
+  const metaSize = document.getElementById('meta-size');
+  const metaEc = document.getElementById('meta-ec');
+  const downloadBtn = document.getElementById('download-png');
+
+  let currentSize = 256;
+  let qr = null;
+
+  sizeOptions.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if(!btn) return;
+    sizeOptions.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentSize = parseInt(btn.dataset.size, 10);
+    generate();
+  });
+
+  function ecMap(level){
+    return { L: QRCode.CorrectLevel.L, M: QRCode.CorrectLevel.M,
+             Q: QRCode.CorrectLevel.Q, H: QRCode.CorrectLevel.H }[level];
+  }
+
+  function generate(){
+    const text = textInput.value.trim();
+    qrTarget.innerHTML = '';
+
+    if(!text){
+      qrTarget.innerHTML = `<div class="empty-state">— NO SIGNAL —<br>enter content and generate</div>`;
+      metaSize.textContent = `${currentSize} × ${currentSize}`;
+      metaEc.textContent = `EC: ${ecLevel.value}`;
+      return;
+    }
+
+    qr = new QRCode(qrTarget, {
+      text: text,
+      width: currentSize,
+      height: currentSize,
+      colorDark: fgColor.value,
+      colorLight: bgColor.value,
+      correctLevel: ecMap(ecLevel.value)
+    });
+
+    metaSize.textContent = `${currentSize} × ${currentSize}`;
+    metaEc.textContent = `EC: ${ecLevel.value}`;
+
+    scanLine.classList.remove('active');
+    void scanLine.offsetWidth;
+    scanLine.classList.add('active');
+  }
+
+  downloadBtn.addEventListener('click', () => {
+    const canvas = qrTarget.querySelector('canvas');
+    const img = qrTarget.querySelector('img');
+    let dataUrl;
+
+    if(canvas){
+      dataUrl = canvas.toDataURL('image/png');
+    } else if(img){
+      dataUrl = img.src;
+    } else {
+      return;
+    }
+
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = 'qr-code.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+
+  generateBtn.addEventListener('click', generate);
+  [fgColor, bgColor, ecLevel].forEach(el => el.addEventListener('change', generate));
+  textInput.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter' && (e.metaKey || e.ctrlKey)){
+      generate();
+    }
+  });
+
+  // initial generate
+  generate();
+
+  // ---------------- App tabs ----------------
+  const appTabs = document.getElementById('app-tabs');
+  const generateView = document.getElementById('generate-view');
+  const scanView = document.getElementById('scan-view');
+
+  appTabs.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if(!btn) return;
+    appTabs.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const tab = btn.dataset.tab;
+    generateView.style.display = tab === 'generate' ? 'block' : 'none';
+    scanView.style.display = tab === 'scan' ? 'block' : 'none';
+    if(tab !== 'scan') stopCamera();
+  });
+
+  // ---------------- Wi-Fi QR scanner ----------------
+  const scanVideo = document.getElementById('scan-video');
+  const scanPlaceholder = document.getElementById('scan-placeholder');
+  const scanCanvas = document.getElementById('scan-canvas');
+  const scanToggleBtn = document.getElementById('scan-toggle-btn');
+  const camScanLine = document.getElementById('cam-scan-line');
+  const scanStatusRow = document.getElementById('scan-status-row');
+  const scanStatusText = document.getElementById('scan-status-text');
+  const scanResult = document.getElementById('scan-result');
+  const resultRaw = document.getElementById('result-raw');
+  const resultRawCopy = document.getElementById('result-raw-copy');
+  const resultTypeLabel = document.getElementById('result-type-label');
+  const resultPasswordRow = document.getElementById('result-password-row');
+  const resultSecurityRow = document.getElementById('result-security-row');
+  const resultPassword = document.getElementById('result-password');
+  const resultPasswordCopy = document.getElementById('result-password-copy');
+  const resultSecurity = document.getElementById('result-security');
+  const resultPwToggle = document.getElementById('result-pw-toggle');
+  const openLinkBtn = document.getElementById('open-link-btn');
+  const openSettingsBtn = document.getElementById('open-settings-btn');
+  const scanAgainBtn = document.getElementById('scan-again-btn');
+
+  const scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
+  let cameraStream = null;
+  let scanRAF = null;
+  let lastResult = null;
+
+  function unescWifi(str){
+    return str.replace(/\\(.)/g, '$1');
+  }
+
+  function parseWifiString(str){
+    if(!/^WIFI:/i.test(str)) return null;
+    const body = str.replace(/^WIFI:/i, '');
+    const re = /([A-Za-z]):((?:\\.|[^\\;])*);/g;
+    const out = {};
+    let m;
+    while((m = re.exec(body)) !== null){
+      out[m[1].toUpperCase()] = unescWifi(m[2]);
+    }
+    if(!out.S) return null;
+    return {
+      ssid: out.S,
+      password: out.P || '',
+      security: (out.T || 'nopass').toUpperCase(),
+      hidden: out.H === 'true'
+    };
+  }
+
+  function detectUrl(str){
+    if(/^https?:\/\//i.test(str)) return str;
+    if(/^www\./i.test(str)) return 'https://' + str;
+    return null;
+  }
+
+  function detectMailto(str){
+    if(/^mailto:/i.test(str)) return str.replace(/^mailto:/i, '');
+    if(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(str)) return str;
+    return null;
+  }
+
+  function detectTel(str){
+    if(/^tel:/i.test(str)) return str.replace(/^tel:/i, '');
+    return null;
+  }
+
+  async function startCamera(){
+    scanResult.style.display = 'none';
+    try{
+      cameraStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      });
+    } catch(err){
+      scanStatusText.textContent = 'Camera access denied or unavailable';
+      return;
+    }
+    scanVideo.srcObject = cameraStream;
+    scanVideo.style.display = 'block';
+    scanPlaceholder.style.display = 'none';
+    scanToggleBtn.textContent = 'Stop camera';
+    scanStatusRow.classList.add('live');
+    scanStatusText.textContent = 'Scanning for a Wi-Fi code…';
+    camScanLine.classList.add('active');
+    scanVideo.play();
+    scanRAF = requestAnimationFrame(scanFrame);
+  }
+
+  function stopCamera(){
+    if(scanRAF) cancelAnimationFrame(scanRAF);
+    scanRAF = null;
+    if(cameraStream){
+      cameraStream.getTracks().forEach(t => t.stop());
+      cameraStream = null;
+    }
+    scanVideo.style.display = 'none';
+    scanPlaceholder.style.display = 'block';
+    scanToggleBtn.textContent = 'Start camera';
+    scanStatusRow.classList.remove('live');
+    scanStatusText.textContent = 'Camera idle';
+    camScanLine.classList.remove('active');
+  }
+
+  function scanFrame(){
+    if(scanVideo.readyState === scanVideo.HAVE_ENOUGH_DATA){
+      scanCanvas.width = scanVideo.videoWidth;
+      scanCanvas.height = scanVideo.videoHeight;
+      scanCtx.drawImage(scanVideo, 0, 0, scanCanvas.width, scanCanvas.height);
+      const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+      const code = window.jsQR ? jsQR(imageData.data, imageData.width, imageData.height) : null;
+      if(code && code.data){
+        handleDecoded(code.data);
+        return;
+      }
+    }
+    scanRAF = requestAnimationFrame(scanFrame);
+  }
+
+  function copyText(btn, value){
+    navigator.clipboard.writeText(value).then(() => {
+      const original = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(() => { btn.textContent = original; }, 1200);
+    }).catch(() => { /* clipboard unavailable — silently ignore */ });
+  }
+
+  function handleDecoded(data){
+    lastResult = data;
+    stopCamera();
+
+    // reset extra rows/buttons each time
+    resultPasswordRow.style.display = 'none';
+    resultSecurityRow.style.display = 'none';
+    openLinkBtn.style.display = 'none';
+    openSettingsBtn.style.display = 'none';
+
+    const wifi = parseWifiString(data);
+    const url = detectUrl(data);
+    const email = detectMailto(data);
+    const tel = detectTel(data);
+
+    if(wifi){
+      resultTypeLabel.textContent = 'SSID';
+      resultRaw.textContent = wifi.ssid;
+      resultPassword.textContent = wifi.password || '(none)';
+      resultPassword.classList.add('masked');
+      resultPwToggle.textContent = 'Show';
+      resultSecurity.textContent = wifi.security === 'NOPASS' ? 'Open network' : wifi.security;
+      resultPasswordRow.style.display = 'flex';
+      resultSecurityRow.style.display = 'flex';
+      openSettingsBtn.style.display = 'block';
+      openSettingsBtn.textContent = 'Open Wi-Fi settings';
+    } else if(url){
+      resultTypeLabel.textContent = 'Link';
+      resultRaw.textContent = data;
+      openLinkBtn.style.display = 'block';
+      openLinkBtn.textContent = 'Open link';
+      openLinkBtn.onclick = () => window.open(url, '_blank', 'noopener');
+    } else if(email){
+      resultTypeLabel.textContent = 'Email';
+      resultRaw.textContent = data;
+      openLinkBtn.style.display = 'block';
+      openLinkBtn.textContent = 'Compose email';
+      openLinkBtn.onclick = () => { window.location.href = /^mailto:/i.test(data) ? data : ('mailto:' + data); };
+    } else if(tel){
+      resultTypeLabel.textContent = 'Phone';
+      resultRaw.textContent = data;
+      openLinkBtn.style.display = 'block';
+      openLinkBtn.textContent = 'Call number';
+      openLinkBtn.onclick = () => { window.location.href = 'tel:' + tel; };
+    } else {
+      resultTypeLabel.textContent = 'Content';
+      resultRaw.textContent = data;
+    }
+
+    scanResult.style.display = 'block';
+  }
+
+  function openWifiSettings(){
+    const ua = navigator.userAgent;
+    let uri = null;
+    if(/Windows/i.test(ua)) uri = 'ms-settings:network-wifi';
+    else if(/Macintosh|Mac OS/i.test(ua)) uri = 'x-apple.systempreferences:com.apple.preference.network';
+    if(uri){
+      window.location.href = uri;
+    } else {
+      alert('Open your system Wi-Fi settings, then paste the copied network name and password.');
+    }
+  }
+
+  scanToggleBtn.addEventListener('click', () => {
+    if(cameraStream){ stopCamera(); } else { startCamera(); }
+  });
+
+  resultPwToggle.addEventListener('click', () => {
+    const masked = resultPassword.classList.toggle('masked');
+    resultPwToggle.textContent = masked ? 'Show' : 'Hide';
+  });
+
+  resultRawCopy.addEventListener('click', () => copyText(resultRawCopy, resultRaw.textContent));
+  resultPasswordCopy.addEventListener('click', () => copyText(resultPasswordCopy, resultPassword.textContent));
+
+  openSettingsBtn.addEventListener('click', openWifiSettings);
+
+  scanAgainBtn.addEventListener('click', () => {
+    scanResult.style.display = 'none';
+    startCamera();
+  });
+
+</script>
+
+</body>
+</html>
