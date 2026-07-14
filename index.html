@@ -75,13 +75,15 @@
     QR scanner will stop working.
 -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
-  integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSQX0FslNhTDadL4O5SAGapGt4FodqL8My0mA=="
-  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.js"
-  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<!-- ^ integrity hash intentionally omitted here — see server-headers/README-SECURITY.md
-     to generate and add the correct one. A wrong/guessed hash would make the
-     browser silently refuse to run this file and the scanner would stop working. -->
+  referrerpolicy="no-referrer"></script>
+<!-- SRI (integrity=...) intentionally removed on both tags above — the pinned
+     hash on qrcode.min.js didn't match what cdnjs actually served, which made
+     the browser silently block the script and broke QR generation entirely.
+     See server-headers/README-SECURITY.md for the command to regenerate
+     correct hashes for both files, then add integrity="sha512-..." (plus
+     crossorigin="anonymous") back to each tag once you've verified them. -->
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
